@@ -1,0 +1,9 @@
+{
+  "Id": "Blocks die on detach",
+  "DisplayName": "No Block Detach",
+  "Author": "FLSoz",
+  "Version": "0.1.0",
+  "Enable": true,
+  "AssemblyName": "NoBlockDetach.dll",
+  "EntryMethod": "NoBlockDetach.IngressPoint.Main"
+}
