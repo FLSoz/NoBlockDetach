@@ -1,1 +1,1 @@
-https://github.com/FLSoz/NoBlockDetach/tree/master/bin/Debug
+https://github.com/FLSoz/NoBlockDetach/tree/main/bin/Debug
