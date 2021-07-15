@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Harmony;
+using HarmonyLib;
 using UnityEngine;
 using System.Collections;
 
@@ -235,7 +235,7 @@ namespace NoBlockDetach
         public static void Main()
         {
             Console.WriteLine("WALALALA");
-            HarmonyInstance.Create("flsoz.ttmm.noblockdetach.mod").PatchAll(Assembly.GetExecutingAssembly());
+            new Harmony("flsoz.ttmm.noblockdetach.mod").PatchAll(Assembly.GetExecutingAssembly());
         }
     }
 }
