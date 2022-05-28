@@ -72,9 +72,7 @@ echo !modpath!
 
 for %25%25I in (*) do (
   if not "%25%25I" =="$(TargetFileName)" (
-    if not "%25%25I" == "LogManager.dll" (
-      del "%25%25I"
-    )
+    del "%25%25I"
   )
 )
 
@@ -87,19 +85,9 @@ set e=$(TargetDir)..\&gt;nul
 
 echo Copying to game
 xcopy /S /Y /R "$(TargetFileName)" !modpath!
-if not "$(TargetFileName)" == "LogManager.dll" (
-  xcopy /S /Y /R "LogManager.dll" !modpath!
-)
 
 echo Copying to Unity
-xcopy /S /Y /R "$(TargetFileName)" !unitypath!
-if not "$(TargetFileName)" == "LogManager.dll" (
-  xcopy /S /Y /R "LogManager.dll" !unitypath!
-)
-
-if not "$(TargetFileName)" == "LogManager.dll" (
-  del "LogManager.dll"
-)</PostBuildEvent>
+xcopy /S /Y /R "$(TargetFileName)" !unitypath!</PostBuildEvent>
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
