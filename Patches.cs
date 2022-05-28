@@ -150,7 +150,7 @@ namespace NoBlockDetach
         [HarmonyPatch(typeof(BlockManager), "PreRecurseActionRemove")]
         public static class PatchRecursiveDetach
         {
-            public static void Postfix(ref TankBlock block)
+            public static void Prefix(ref TankBlock block)
             {
                 if (!block.tank || !block.tank.ControllableByAnyPlayer)
                 {
