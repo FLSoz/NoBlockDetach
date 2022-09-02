@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
@@ -37,127 +38,130 @@ namespace NoBlockDetach
             }
         }
 
-        private const BindingFlags InstanceFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-        private static readonly FieldInfo m_DetachCallback = typeof(BlockManager).GetField("m_DetachCallback",InstanceFlags);
-        private static readonly FieldInfo tank = typeof(BlockManager).GetField("tank",InstanceFlags);
-        private static readonly FieldInfo allBlocks = typeof(BlockManager).GetField("allBlocks",InstanceFlags);
-        private static readonly FieldInfo m_RemoveBlockRecursionCounter = typeof(BlockManager).GetField("m_RemoveBlockRecursionCounter",InstanceFlags);
-
-        private static readonly FieldInfo blockTable = typeof(BlockManager).GetField("blockTable",InstanceFlags);
-        private static readonly FieldInfo m_APbitfield = typeof(BlockManager).GetField("m_APbitfield",InstanceFlags);
-        private static readonly FieldInfo rootBlock = typeof(BlockManager).GetField("rootBlock",InstanceFlags);
-        private static readonly FieldInfo _blockCentreBounds = typeof(BlockManager).GetField("_blockCentreBounds",InstanceFlags);
-
-        private static readonly FieldInfo changed = typeof(BlockManager).GetFields(InstanceFlags).FirstOrDefault(field =>
-                    field.CustomAttributes.Any(attr => attr.AttributeType == typeof(CompilerGeneratedAttribute)) &&
-                    (field.DeclaringType == typeof(BlockManager).GetProperty("changed").DeclaringType) &&
-                    field.FieldType.IsAssignableFrom(typeof(BlockManager).GetProperty("changed").PropertyType) &&
-                    field.Name.StartsWith("<" + typeof(BlockManager).GetProperty("changed").Name + ">")
-                );
-        private static readonly FieldInfo BlockHash = typeof(BlockManager).GetFields(InstanceFlags).FirstOrDefault(field =>
-                    field.CustomAttributes.Any(attr => attr.AttributeType == typeof(CompilerGeneratedAttribute)) &&
-                    (field.DeclaringType == typeof(BlockManager).GetProperty("BlockHash").DeclaringType) &&
-                    field.FieldType.IsAssignableFrom(typeof(BlockManager).GetProperty("BlockHash").PropertyType) &&
-                    field.Name.StartsWith("<" + typeof(BlockManager).GetProperty("BlockHash").Name + ">")
-                );
-        private static readonly MethodInfo FixupBlockRefs = typeof(BlockManager).GetMethod("FixupBlockRefs", InstanceFlags);
-        private static readonly MethodInfo HostRemoveAllBlocks = typeof(BlockManager).GetMethod("HostRemoveAllBlocks", InstanceFlags);
-
-        private static Bounds k_InvalidBounds = (Bounds)typeof(BlockManager).GetField("k_InvalidBounds", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
-
-        private static void RemoveAllBlocks(BlockManager __instance, BlockManager.RemoveAllAction option)
+        // disable healing of dying blocks
+        // This one still wastes energy trying to heal the dying blocks
+        /*
+        [HarmonyPatch(typeof(Damageable), "Repair")]
+        public static class PatchHealing
         {
-            Tank tank = (Tank) Patches.tank.GetValue(__instance);
-            if (tank.rbody.isKinematic)
+            public static bool Prefix(ref Damageable __instance)
             {
-                tank.rbody.isKinematic = false;
-            }
-            m_RemoveBlockRecursionCounter.SetValue(__instance, 1);
-            List<TankBlock> allBlocks = (List<TankBlock>) Patches.allBlocks.GetValue(__instance);
-            Action<Tank, TankBlock> DetachCallback = (Action<Tank, TankBlock>) Patches.m_DetachCallback.GetValue(__instance);
-
-            foreach (TankBlock tankBlock in allBlocks)
-            {
-                bool flag = option != BlockManager.RemoveAllAction.Recycle;
-                tankBlock.OnDetach(tank, flag, flag);
-                tank.NotifyBlock(tankBlock, false);
-                tankBlock.RemoveLinks(null, true);
-                DetachCallback?.Invoke(tank, tankBlock);
-                switch (option)
+                if (__instance.Health <= 0.0f)
                 {
-                    case BlockManager.RemoveAllAction.ApplyPhysicsKick:
-                        tankBlock.trans.parent = null;
-                        tankBlock.trans.Recycle(true);
-                        break;
-                    case BlockManager.RemoveAllAction.Recycle:
-                        tankBlock.trans.Recycle(true);
-                        break;
-                    case BlockManager.RemoveAllAction.HandOff:
-                        tankBlock.trans.parent = null;
-                        tankBlock.trans.Recycle(true);
-                        break;
-                    default:
-                        d.LogError("BlockManager.RemoveAllBlocks - No remove action found for " + option);
-                        break;
+                    return false;
                 }
-            }
-            m_RemoveBlockRecursionCounter.SetValue(__instance, 0);
-            allBlocks.Clear();
-
-            TankBlock[,,] l_blockTable = (TankBlock[,,])blockTable.GetValue(__instance);
-            byte[,,] l_m_APbitfield = (byte[,,])m_APbitfield.GetValue(__instance);
-
-            Array.Clear(l_blockTable, 0, l_blockTable.Length);
-            Array.Clear(l_m_APbitfield, 0, l_m_APbitfield.Length);
-            changed.SetValue(__instance, false);
-            rootBlock.SetValue(__instance, null);
-            _blockCentreBounds.SetValue(__instance, k_InvalidBounds);
-        }
-
-        // Handles destroying everything when tech cab is sniped
-        [HarmonyPatch(typeof(BlockManager), "FixupAfterRemovingBlocks")]
-        public static class PatchBlockManagerFixup
-        {
-            public static bool Prefix(ref BlockManager __instance, ref bool allowHeadlessTech, ref bool removeTechIfEmpty)
-            {
-                Tank tank = (Tank) Patches.tank.GetValue(__instance);
-                FixupBlockRefs.Invoke(__instance, null);
-                if (!allowHeadlessTech && !tank.control.HasController && !tank.IsAnchored)
-                {
-                    HostRemoveAllBlocks.Invoke(__instance, new object[] { BlockManager.RemoveAllAction.ApplyPhysicsKick });
-                }
-                if (__instance.blockCount == 0)
-                {
-                    d.Assert(tank.blockman.blockCount == 0);
-                    tank.EnableGravity = false;
-                }
-                return false;
+                return true;
             }
         }
+        */
 
-        // Force every call to this to be the same for MP consistency
-        [HarmonyPatch(typeof(BlockManager), "RemoveAllBlocks")]
-        public static class PatchRemoveAllBlocks
+        // Patch repair bubble healing to no longer work on dead blocks
+        // This one will not waste energy on trying to heal the dying blocks
+        [HarmonyPatch(typeof(ModuleShieldGenerator), "HealContainedVisibles")]
+        public static class PatchBlockResurrection
         {
-            public static bool Prefix(ref BlockManager __instance, ref BlockManager.RemoveAllAction option)
+            internal static PropertyInfo IsAtFullHealth = typeof(Damageable).GetProperty("IsAtFullHealth", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            internal static MethodInfo GetIsAtFullHealth = IsAtFullHealth.GetGetMethod();
+            internal static PropertyInfo Health = typeof(Damageable).GetProperty("Health", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            internal static MethodInfo GetHealth = Health.GetGetMethod();
+
+            [HarmonyTranspiler]
+            public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, ILGenerator ilgen)
             {
-                Patches.RemoveAllBlocks(__instance, option);
-                return false;
+                Label myLabel = ilgen.DefineLabel();
+                Label targetNextBlockIteration = ilgen.DefineLabel();
+
+                List<CodeInstruction> originalInstructions = new List<CodeInstruction>(instructions);
+                List<CodeInstruction> patchedInstructions = new List<CodeInstruction>();
+
+                bool foundVar = false;
+                object index = null;
+                foreach (CodeInstruction instruction in originalInstructions)
+                {
+                    if (instruction.opcode == OpCodes.Ldloca_S)
+                    {
+                        if (!foundVar)
+                        {
+                            foundVar = true;
+                            index = instruction.operand;
+                        }
+                        else if (instruction.operand == index)
+                        {
+                            Console.WriteLine("[NoBlockDetach] FOUND JUMP TARGET");
+                            targetNextBlockIteration = instruction.labels[0];
+                            break;
+                        }
+                    }
+                }
+
+                bool skipNext = false;
+                for (int i = 0; i < originalInstructions.Count; i++)
+                {
+                    CodeInstruction instruction = originalInstructions[i];
+                    if (skipNext)
+                    {
+                        skipNext = false;
+                        continue;
+                    }
+                    else if (instruction.opcode == OpCodes.Ldloca_S && instruction.operand == index && instruction.labels.Count > 0 && instruction.labels[0] == targetNextBlockIteration)
+                    {
+                        Console.WriteLine("[NoBlockDetach] EDITING JUMP TARGET");
+                        instruction.labels.Add(myLabel);
+                        patchedInstructions.Add(instruction);
+                        Console.WriteLine("[NoBlockDetach] EDITED JUMP TARGET");
+                    }
+                    else
+                    {
+                        patchedInstructions.Add(instruction);
+                    }
+                    if (instruction.opcode == OpCodes.Callvirt && (MethodInfo)instruction.operand == GetIsAtFullHealth)
+                    {
+                        Console.WriteLine("[NoBlockDetach] PATCHED RESURRECTION?");
+                        skipNext = true;
+                        // brtrue.s IL_014C;  Go to next item in loop
+                        patchedInstructions.Add(originalInstructions[i+1]);
+                        // Load damageable onto stack again
+                        patchedInstructions.Add(originalInstructions[i-1].Clone());
+                        // Get health
+                        // patchedInstructions.Add(CodeInstruction.Call(typeof(Damageable), "get_Health"));
+                        patchedInstructions.Add(new CodeInstruction(OpCodes.Callvirt, GetHealth));
+                        // Compare it to 0. If health is > 0, then we proceed as normal. If health is <= 0, then we break
+                        // Load 0.0f onto the stack
+                        patchedInstructions.Add(new CodeInstruction(OpCodes.Ldc_R4, 0.0f));
+                        // ble.un.s IL_014C;  Go to next item in loop
+                        patchedInstructions.Add(new CodeInstruction(OpCodes.Ble_Un_S, myLabel));
+                    }
+                }
+                Console.WriteLine("[NoBlockDetach] GOT TO RETURN FINE");
+                return patchedInstructions;
             }
         }
+
 
         // If a block is detached because it can't reach any root, then kill it if it's from an enemy
         [HarmonyPatch(typeof(BlockManager), "PreRecurseActionRemove")]
         public static class PatchRecursiveDetach
         {
-            public static void Prefix(ref TankBlock block)
+            public static void Prefix(ref TankBlock block, out bool __state)
             {
-                if (!block.tank || !block.tank.ControllableByAnyPlayer)
+                if (Singleton.Manager<ManGameMode>.inst.GetCurrentGameType().IsCoOp())
+                {
+                    __state = false;
+                }
+                else
+                {
+                    __state = block.tank && block.tank.IsEnemy();
+                }
+                return;
+            }
+
+            public static void Postfix(ref TankBlock block, bool __state)
+            {
+                if (__state)
                 {
                     ManDamage.DamageInfo damageInfo = new ManDamage.DamageInfo(float.PositiveInfinity, ManDamage.DamageType.Standard, (Component)null, (Tank)null, block.transform.position, default(Vector3), 0.0f, 0.0f);
                     block.visible.damageable.TryToDamage(damageInfo, true);
                 }
-                return;
             }
         }
     }
