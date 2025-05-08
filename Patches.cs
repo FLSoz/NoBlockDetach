@@ -160,7 +160,7 @@ namespace NoBlockDetach
                 if (__state)
                 {
                     ManDamage.DamageInfo damageInfo = new ManDamage.DamageInfo(float.PositiveInfinity, ManDamage.DamageType.Standard, (Component)null, (Tank)null, block.transform.position, default(Vector3), 0.0f, 0.0f);
-                    block.visible.damageable.TryToDamage(damageInfo, true);
+                    block.visible.damageable.TryToDamage(damageInfo, true, false);
                 }
             }
         }
